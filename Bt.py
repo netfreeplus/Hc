@@ -1,106 +1,80 @@
 import telebot
+from telebot import types
 import requests
-import json
-import sys
-from colorama import init, Fore, Style
-from telebot.types import InlineKeyboardMarkup, InlineKeyboardButton
 
-# Inicializar colorama para el formato de colores en la consola
-init(autoreset=True)
-
-# Pedir el token del bot al usuario
-print(Fore.YELLOW + Style.BRIGHT + "Por favor, introduce tu token de Telegram:")
-TOKEN = input(Fore.GREEN + Style.BRIGHT + "> ")
-
-# Inicializar el bot con el token proporcionado
+# Inicializa el bot con el token de Telegram
+TOKEN = "TU_TOKEN_AQUÍ"
 bot = telebot.TeleBot(TOKEN)
 
-# Comando /start - Mensaje de bienvenida
+# Función que se ejecuta cuando el usuario usa /start
 @bot.message_handler(commands=['start'])
 def send_welcome(message):
-    markup = InlineKeyboardMarkup()
-    btn_bin = InlineKeyboardButton("Consultar BIN", callback_data="consultar_bin")
-    markup.add(btn_bin)
-    bot.send_message(message.chat.id, 
-                     "¡Bienvenido al Bot de consulta de BIN! Usa /bin seguido del número BIN para obtener información sobre una tarjeta.\n" +
-                     "O presiona el botón a continuación para realizar una consulta.", 
-                     reply_markup=markup)
+    # Creando un menú con botones
+    markup = types.ReplyKeyboardMarkup(resize_keyboard=True)
+    btn1 = types.KeyboardButton("🔍 Validar BIN")
+    btn2 = types.KeyboardButton("💳 Generar tarjeta")
+    btn3 = types.KeyboardButton("✔️ Validar tarjeta")
+    markup.add(btn1, btn2, btn3)
+    
+    # Enviando mensaje con los botones
+    bot.send_message(message.chat.id, "¡Bienvenido! Elige una opción:", reply_markup=markup)
 
-# Comando /help - Mostrar ayuda
-@bot.message_handler(commands=['help'])
-def send_help(message):
-    bot.send_message(message.chat.id, """
-Lista de comandos disponibles:
-- /start: Iniciar el bot y mostrar bienvenida.
-- /help: Mostrar esta ayuda.
-- /about: Información sobre el bot.
-- /bin [número BIN]: Consultar información sobre un BIN.
-    """)
-
-# Comando /about - Mostrar información del bot
-@bot.message_handler(commands=['about'])
-def send_about(message):
-    bot.send_message(message.chat.id, "Este bot fue creado para la consulta de BINs. Proyecto para la universidad.")
-
-# Manejador de consultas BIN
-@bot.message_handler(commands=['bin'])
+# Función para validar el BIN (esto ya lo tienes implementado)
+@bot.message_handler(func=lambda message: message.text == "🔍 Validar BIN")
 def handle_bin(message):
-    bin_input = message.text[len("/bin "):].strip()
-    
-    # Validaciones del BIN
-    if not bin_input.isdigit() or not (6 <= len(bin_input) <= 8):
-        bot.send_message(message.chat.id, "Debes colocar /bin seguido de un BIN numérico de entre 6 y 8 dígitos.")
-        return
-    
-    # Llamada a la API para obtener datos del BIN
-    try:
+    bot.send_message(message.chat.id, "Introduce el BIN que deseas validar (debe tener al menos 6 dígitos):")
+    bot.register_next_step_handler(message, validate_bin)
+
+def validate_bin(message):
+    bin_input = message.text.strip()
+    if not bin_input.isdigit() or len(bin_input) < 6:
+        bot.send_message(message.chat.id, "Debes ingresar un BIN numérico de al menos 6 dígitos.")
+    else:
+        # Aquí va tu código para la validación del BIN con la API
         response = requests.get(f"https://data.handyapi.com/bin/{bin_input}")
-        response.raise_for_status()
         api = response.json()
-
-        # Si la API responde con éxito
         if api["Status"] == "SUCCESS":
-            paisNombre = api["Country"]["Name"]
-            marca = api["Scheme"]
-            tipo = api["Type"]
-            nivel = api["CardTier"]
-            banco = api["Issuer"]
-
-            # Enviar respuesta en formato Markdown
-            bot.send_message(message.chat.id, f"""
-**Información solicitada:**
-- **BIN**: `{bin_input}`
-- **Nivel**: `{nivel}`
-- **Tipo**: `{tipo}`
-- **Marca**: `{marca}`
-- **País**: `{paisNombre}`
-- **Banco**: `{banco}`
-            """, parse_mode="Markdown")
+            bot.send_message(message.chat.id, f"Información del BIN {bin_input}: {api}")
         else:
-            bot.send_message(message.chat.id, 'Por favor, ingresa un BIN válido.')
+            bot.send_message(message.chat.id, "El BIN ingresado no es válido.")
 
-    # Manejo de errores de conexión o respuesta
-    except requests.exceptions.RequestException as e:
-        bot.send_message(message.chat.id, f"Error al conectar con la API: {str(e)}")
-    except json.JSONDecodeError:
-        bot.send_message(message.chat.id, "Error al procesar la respuesta de la API.")
+# Función para generar tarjetas (usando el algoritmo de Luhn)
+@bot.message_handler(func=lambda message: message.text == "💳 Generar tarjeta")
+def generate_card(message):
+    card_number = generate_luhn_card()
+    bot.send_message(message.chat.id, f"Tarjeta generada: {card_number}")
 
-# Manejador de botones
-@bot.callback_query_handler(func=lambda call: call.data == "consultar_bin")
-def consultar_bin(call):
-    bot.send_message(call.message.chat.id, "Por favor, introduce el BIN después de /bin")
+def generate_luhn_card():
+    import random
+    def luhn_residue(digits):
+        return sum(sum(divmod(int(d) * (1 + i % 2), 10)) for i, d in enumerate(digits[::-1])) % 10
+    base = [str(random.randint(0, 9)) for _ in range(15)]
+    check_digit = (10 - luhn_residue(base)) % 10
+    return ''.join(base) + str(check_digit)
 
-# Función para iniciar el bot y escuchar comandos
-def start_bot():
-    print(Fore.CYAN + Style.BRIGHT + "El bot está funcionando correctamente. Esperando comandos...")
+# Función para validar una tarjeta de crédito usando el algoritmo de Luhn
+@bot.message_handler(func=lambda message: message.text == "✔️ Validar tarjeta")
+def validate_card(message):
+    bot.send_message(message.chat.id, "Introduce el número de tarjeta que deseas validar:")
+    bot.register_next_step_handler(message, check_card)
 
-    try:
-        bot.polling(none_stop=True)
-    except Exception as e:
-        print(Fore.MAGENTA + Style.BRIGHT + f"Se perdió la conexión: {e}")
-        print(Fore.RED + Style.BRIGHT + "La conexión se perdió. Por favor, reinicia el script manualmente.")
-        sys.exit()
+def check_card(message):
+    card_number = message.text.strip()
+    if luhn_check(card_number):
+        bot.send_message(message.chat.id, "La tarjeta es válida según el algoritmo de Luhn.")
+    else:
+        bot.send_message(message.chat.id, "La tarjeta no es válida.")
 
-# Función principal
-if __name__ == "__main__":
-    start_bot()
+def luhn_check(card_number):
+    def digits_of(n):
+        return [int(d) for d in str(n)]
+    digits = digits_of(card_number)
+    odd_digits = digits[-1::-2]
+    even_digits = digits[-2::-2]
+    checksum = sum(odd_digits)
+    for d in even_digits:
+        checksum += sum(digits_of(d * 2))
+    return checksum % 10 == 0
+
+# Función para ejecutar el bot de forma continua
+bot.polling(none_stop=True)
